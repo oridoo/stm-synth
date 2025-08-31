@@ -25,12 +25,13 @@ set(CMAKE_PROJECT_NAME stm-synth)
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
-# Enable CMake support for ASM and C languages
-enable_language(C ASM)
 
 # Core project settings
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
+
+# Enable CMake support for ASM and C languages
+enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
@@ -64,3 +65,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+#add_compile_options(-mcpu=cortex-m7 -mthumb -mno-thumb-interwork -mfpu=vfp -msoft-float)

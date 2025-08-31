@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <math.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,10 +56,36 @@ static void MX_DMA_Init(void);
 static void MX_I2S3_Init(void);
 /* USER CODE BEGIN PFP */
 
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+#define AUDIO_BUFFER_SIZE 128
+__attribute__((aligned(4))) int32_t audio_buffer[AUDIO_BUFFER_SIZE * 2] = {0};
+
+volatile float phase = 0.0f;
+const float sample_rate = 48000.0f;
+const float frequency = 440.0f;
+const float phase_increment = frequency / sample_rate;
+const float gain = 0.5f;
+
+void GenerateAudioBlock(int32_t* buffer, int length) {
+  for (int i = 0; i < length; i++) {
+    float sample = sinf(2.0f * M_PI * phase);
+
+    // Scale float [-1.0f .. 1.0f] to signed 24-bit range: [-8388607 .. 8388607]
+    int32_t sample_24bit = (int32_t)(sample * 8388607.0f * gain);
+
+    buffer[i] = sample_24bit << 8;
+
+    phase += phase_increment;
+    if (phase >= 1.0f) phase -= 1.0f;
+  }
+}
+
+
 
 /* USER CODE END 0 */
 
@@ -99,8 +126,12 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  GenerateAudioBlock(audio_buffer, AUDIO_BUFFER_SIZE * 2);
+  HAL_StatusTypeDef ret = HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audio_buffer, AUDIO_BUFFER_SIZE * 2);
   while (1)
   {
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -120,18 +151,17 @@ void SystemClock_Config(void)
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 16;
-  RCC_OscInitStruct.PLL.PLLN = 192;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 432;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
@@ -153,10 +183,10 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_7) != HAL_OK)
   {
     Error_Handler();
   }
@@ -179,7 +209,7 @@ static void MX_I2S3_Init(void)
   /* USER CODE END I2S3_Init 1 */
   hi2s3.Instance = SPI3;
   hi2s3.Init.Mode = I2S_MODE_MASTER_TX;
-  hi2s3.Init.Standard = I2S_STANDARD_PHILIPS;
+  hi2s3.Init.Standard = I2S_STANDARD_MSB;
   hi2s3.Init.DataFormat = I2S_DATAFORMAT_24B;
   hi2s3.Init.MCLKOutput = I2S_MCLKOUTPUT_ENABLE;
   hi2s3.Init.AudioFreq = I2S_AUDIOFREQ_48K;
@@ -190,7 +220,8 @@ static void MX_I2S3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN I2S3_Init 2 */
-
+  __HAL_I2S_ENABLE_IT(&hi2s3, (I2S_IT_TXE | I2S_IT_ERR));
+  __HAL_RCC_PLLI2S_ENABLE();
   /* USER CODE END I2S3_Init 2 */
 
 }
@@ -329,6 +360,18 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
+  GenerateAudioBlock(&audio_buffer[0], AUDIO_BUFFER_SIZE);
+}
+
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
+  GenerateAudioBlock(&audio_buffer[AUDIO_BUFFER_SIZE], AUDIO_BUFFER_SIZE);
+}
+
+void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s) {
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
 
 /* USER CODE END 4 */
 
