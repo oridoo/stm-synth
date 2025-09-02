@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <math.h>
 #include <string.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,22 +64,29 @@ static void MX_I2S3_Init(void);
 /* USER CODE BEGIN 0 */
 
 #define AUDIO_BUFFER_SIZE 128
-__attribute__((aligned(4))) int32_t audio_buffer[AUDIO_BUFFER_SIZE * 2] = {0};
+#define AUDIO_RANGE 32767.0f
+__attribute__((aligned(4))) int16_t audio_buffer[AUDIO_BUFFER_SIZE * 2] = {0};
+bool muted = true;
 
 volatile float phase = 0.0f;
-const float sample_rate = 48000.0f;
+const float sample_rate = 48000.0f * 0.976f;
 const float frequency = 440.0f;
 const float phase_increment = frequency / sample_rate;
-const float gain = 0.5f;
+const float gain = 0.9f;
 
-void GenerateAudioBlock(int32_t* buffer, int length) {
-  for (int i = 0; i < length; i++) {
-    float sample = sinf(2.0f * M_PI * phase);
+void GenerateAudioBlock(int16_t* buf, int halfSize)
+{
+  if (muted) {
+    memset(buf, INT16_MIN, halfSize * (sizeof(int16_t)));
+    return;
+  }
+  for (int i = 0; i < halfSize; i += 2)
+  {
+    float s = sinf(2.0f * M_PI * phase) * gain;
+    int16_t v = (int16_t)(s * AUDIO_RANGE);
 
-    // Scale float [-1.0f .. 1.0f] to signed 24-bit range: [-8388607 .. 8388607]
-    int32_t sample_24bit = (int32_t)(sample * 8388607.0f * gain);
-
-    buffer[i] = sample_24bit << 8;
+    buf[i]     = v;  // left channel
+    buf[i + 1] = v;  // right channel (mono)
 
     phase += phase_increment;
     if (phase >= 1.0f) phase -= 1.0f;
@@ -126,11 +134,18 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  GenerateAudioBlock(audio_buffer, AUDIO_BUFFER_SIZE * 2);
-  HAL_StatusTypeDef ret = HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audio_buffer, AUDIO_BUFFER_SIZE * 2);
+  HAL_StatusTypeDef ret = HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)&audio_buffer[0], AUDIO_BUFFER_SIZE * 2);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
   while (1)
   {
-
+    if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+      muted = false;
+    }
+    else {
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+      muted = true;
+    }
 
     /* USER CODE END WHILE */
 
@@ -209,8 +224,8 @@ static void MX_I2S3_Init(void)
   /* USER CODE END I2S3_Init 1 */
   hi2s3.Instance = SPI3;
   hi2s3.Init.Mode = I2S_MODE_MASTER_TX;
-  hi2s3.Init.Standard = I2S_STANDARD_MSB;
-  hi2s3.Init.DataFormat = I2S_DATAFORMAT_24B;
+  hi2s3.Init.Standard = I2S_STANDARD_PHILIPS;
+  hi2s3.Init.DataFormat = I2S_DATAFORMAT_16B;
   hi2s3.Init.MCLKOutput = I2S_MCLKOUTPUT_ENABLE;
   hi2s3.Init.AudioFreq = I2S_AUDIOFREQ_48K;
   hi2s3.Init.CPOL = I2S_CPOL_LOW;
@@ -220,7 +235,6 @@ static void MX_I2S3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN I2S3_Init 2 */
-  __HAL_I2S_ENABLE_IT(&hi2s3, (I2S_IT_TXE | I2S_IT_ERR));
   __HAL_RCC_PLLI2S_ENABLE();
   /* USER CODE END I2S3_Init 2 */
 
@@ -266,6 +280,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(XSMT_GPIO_Port, XSMT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : USER_Btn_Pin */
   GPIO_InitStruct.Pin = USER_Btn_Pin;
@@ -332,6 +349,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : XSMT_Pin */
+  GPIO_InitStruct.Pin = XSMT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  HAL_GPIO_Init(XSMT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : USB_SOF_Pin USB_ID_Pin USB_DM_Pin USB_DP_Pin */
   GPIO_InitStruct.Pin = USB_SOF_Pin|USB_ID_Pin|USB_DM_Pin|USB_DP_Pin;
